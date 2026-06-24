@@ -1,0 +1,99 @@
+{
+  "name": "context-doodle",
+  "displayName": "Context Doodle",
+  "description": "An animated SVG blob that grows fatter as your Cline AI-coding session's context window fills up.",
+  "version": "0.1.0",
+  "publisher": "context-doodle",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "contextDoodle",
+          "title": "Context Doodle",
+          "icon": "media/blob.svg"
+        }
+      ]
+    },
+    "views": {
+      "contextDoodle": [
+        {
+          "id": "contextDoodle.view",
+          "name": "Doodle",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "contextDoodle.revealSidebar",
+        "title": "Context Doodle: Reveal Sidebar"
+      },
+      {
+        "command": "contextDoodle.openPanel",
+        "title": "Context Doodle: Open in Editor Area"
+      }
+    ],
+    "configuration": {
+      "title": "Context Doodle",
+      "properties": {
+        "contextDoodle.contextWindowMax": {
+          "type": "number",
+          "default": 200000,
+          "minimum": 1000,
+          "description": "Model context-window size used to compute the fill ratio."
+        },
+        "contextDoodle.pollIntervalMs": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 250,
+          "description": "How often to re-read the watched extension's task file (ms)."
+        },
+        "contextDoodle.targetExtensionId": {
+          "type": "string",
+          "default": "saoudrizwan.claude-dev",
+          "description": "The extension whose ui_messages.json to watch. Cline, Roo Code (rooveterinaryinc.roo-cline), and Kilo (kilocode.kilo-code) share the same on-disk format."
+        },
+        "contextDoodle.statusBar.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the ambient status-bar blob (animated character + percent that turns amber/red as fill rises). Always visible — the one surface that needs no clicking."
+        },
+        "contextDoodle.autoRevealSidebar": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reveal the Context Doodle sidebar view automatically when the extension activates."
+        },
+        "contextDoodle.autoOpenPanel": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open the Context Doodle animated panel beside the active editor automatically when the extension activates. Drag/dock once and it stays visible while coding."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.js --production",
+    "watch": "node esbuild.js --watch",
+    "compile": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.4.0"
+  }
+}
