@@ -43,8 +43,66 @@
       {
         "command": "contextDoodle.openPanel",
         "title": "Context Doodle: Open in Editor Area"
+      },
+      {
+        "command": "contextDoodle.dev.setFill",
+        "title": "Context Doodle (Dev): Set Fill…",
+        "category": "Context Doodle Dev"
+      },
+      {
+        "command": "contextDoodle.dev.pickFill",
+        "title": "Context Doodle (Dev): Pick Preset Fill…",
+        "category": "Context Doodle Dev"
+      },
+      {
+        "command": "contextDoodle.dev.bump",
+        "title": "Context Doodle (Dev): Bump Fill ±…",
+        "category": "Context Doodle Dev"
+      },
+      {
+        "command": "contextDoodle.dev.sweep",
+        "title": "Context Doodle (Dev): Sweep 0→100→0",
+        "category": "Context Doodle Dev"
+      },
+      {
+        "command": "contextDoodle.dev.stopSweep",
+        "title": "Context Doodle (Dev): Stop Sweep",
+        "category": "Context Doodle Dev"
+      },
+      {
+        "command": "contextDoodle.dev.fireAlert",
+        "title": "Context Doodle (Dev): Fire Alert…",
+        "category": "Context Doodle Dev"
       }
     ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "contextDoodle.dev.setFill",
+          "when": "config.contextDoodle.devMode.enabled"
+        },
+        {
+          "command": "contextDoodle.dev.pickFill",
+          "when": "config.contextDoodle.devMode.enabled"
+        },
+        {
+          "command": "contextDoodle.dev.bump",
+          "when": "config.contextDoodle.devMode.enabled"
+        },
+        {
+          "command": "contextDoodle.dev.sweep",
+          "when": "config.contextDoodle.devMode.enabled"
+        },
+        {
+          "command": "contextDoodle.dev.stopSweep",
+          "when": "config.contextDoodle.devMode.enabled"
+        },
+        {
+          "command": "contextDoodle.dev.fireAlert",
+          "when": "config.contextDoodle.devMode.enabled"
+        }
+      ]
+    },
     "configuration": {
       "title": "Context Doodle",
       "properties": {
@@ -119,6 +177,11 @@
           "minimum": 1,
           "exclusiveMaximum": 100,
           "description": "Thresholds at or above this value are treated as 'critical' (red); the rest are 'warning' (amber)."
+        },
+        "contextDoodle.devMode.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Replace the on-disk Cline reader with a manual fill source so you can drive the doodle, alerts, and surfaces from the command palette without Cline running. When on, six 'Context Doodle (Dev)' commands appear in the palette."
         }
       }
     }

@@ -89,6 +89,21 @@ The CSP is locked down to `default-src 'none'` with a nonce on the one inline sc
 | You switch tasks in Cline | Newest task by `mtime` wins; the old task's stale value is dropped on switch. |
 | Sidebar hidden | Polling continues; the latest value is replayed on re-reveal. |
 
+## Developer mode
+
+Set `contextDoodle.devMode.enabled: true` and the extension replaces the on-disk Cline reader with a manual fill source. Six commands appear in the palette (only when dev mode is on):
+
+| Command | What it does |
+| --- | --- |
+| `Context Doodle (Dev): Set Fill…` | Free-text input 0–100 |
+| `Context Doodle (Dev): Pick Preset Fill…` | Pick a value from a list including the off-by-one cases (69, 71, 84, 89, 90, 95) |
+| `Context Doodle (Dev): Bump Fill ±…` | ±1, ±5, ±10 |
+| `Context Doodle (Dev): Sweep 0→100→0` | Auto-animated triangle wave at slow / medium / fast cadence — every threshold/color scrolls past in one go |
+| `Context Doodle (Dev): Stop Sweep` | Stop the sweep |
+| `Context Doodle (Dev): Fire Alert…` | Bypass the AlertEngine and fire a warning/critical alert directly so you can inspect the shake/flash/badge/tag effects in isolation |
+
+The AlertEngine and all four surfaces work identically against the dev source, so threshold crossings, hysteresis, and severity inference all behave the same as against real Cline data.
+
 ## Limitations
 
 - The fill is an approximation. Cline's *own* "context used" display is the source of truth; this extension uses the same heuristic but doesn't account for system-prompt tokens or tool-result overhead.

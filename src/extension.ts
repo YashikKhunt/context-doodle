@@ -2,12 +2,11 @@ import * as vscode from 'vscode';
 import { DoodleViewProvider } from './doodleViewProvider';
 import { DoodlePanelManager } from './doodlePanelManager';
 import { StatusBarBlob } from './statusBarBlob';
-import { FillBroadcaster, FillMeta } from './fillBroadcaster';
+import { FillBroadcaster, FillMeta, AlertSeverity, AlertStyle } from './fillBroadcaster';
 import { AlertEngine } from './alertEngine';
 import { EditorTagDecorator } from './editorTagDecorator';
+import { DevFillSource } from './devFillSource';
 import { findNewestTask, readContextUsed, resolveTargetStorageDir } from './clineReader';
-
-type AlertStyle = 'statusBarFlash' | 'activityBadge' | 'blobShake' | 'editorTag';
 
 interface Config {
   contextWindowMax: number;
@@ -21,6 +20,7 @@ interface Config {
   alertFlashDurationMs: number;
   alertHysteresisMargin: number;
   alertCriticalAt: number;
+  devModeEnabled: boolean;
 }
 
 const ALL_ALERT_STYLES: AlertStyle[] = ['statusBarFlash', 'activityBadge', 'blobShake', 'editorTag'];
@@ -58,7 +58,8 @@ function readConfig(): Config {
     alertStyles: sanitizeStyles(c.get('alerts.styles', ALL_ALERT_STYLES)),
     alertFlashDurationMs: c.get<number>('alerts.flashDurationMs', 2000),
     alertHysteresisMargin: c.get<number>('alerts.hysteresisMargin', 5),
-    alertCriticalAt: c.get<number>('alerts.criticalAt', 85)
+    alertCriticalAt: c.get<number>('alerts.criticalAt', 85),
+    devModeEnabled: c.get<boolean>('devMode.enabled', false)
   };
 }
 
@@ -135,22 +136,142 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('contextDoodle.openPanel', () => panelManager.reveal())
   );
 
-  // ----- poller (rebuilt on config change) -----
-  let stopPoller: (() => void) | undefined;
-  const startPoller = (): void => {
-    stopPoller?.();
-    stopPoller = startFillPoller(context, broadcaster);
+  // ----- fill source: real poller OR developer mock (rebuilt on config change) -----
+  // In dev mode we replace the on-disk Cline poller with a manual source so
+  // the extension can be exercised without Cline running. The dev source is
+  // exposed via the commands below; the AlertEngine and all four surfaces
+  // react identically regardless of which source is producing values.
+  let stopSource: (() => void) | undefined;
+  let devSource: DevFillSource | undefined;
+  const startSource = (): void => {
+    stopSource?.();
+    devSource = undefined;
+    const cfg = readConfig();
+    if (cfg.devModeEnabled) {
+      const dev = new DevFillSource(broadcaster, cfg.contextWindowMax);
+      devSource = dev;
+      stopSource = (): void => {
+        dev.dispose();
+      };
+    } else {
+      stopSource = startFillPoller(context, broadcaster);
+    }
   };
-  startPoller();
+  startSource();
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (!e.affectsConfiguration('contextDoodle')) return;
       syncStatusBar();
       syncAlertEngine();
-      startPoller();
+      startSource();
     }),
-    { dispose: () => stopPoller?.() }
+    { dispose: () => stopSource?.() }
+  );
+
+  // ----- dev mode commands (only meaningful when contextDoodle.devMode.enabled) -----
+  // Command palette visibility is gated by the `when` clauses in package.json,
+  // so end users never see these in normal use. We still register them
+  // unconditionally so the gating clause can refer to them.
+  const requireDev = (): DevFillSource | undefined => {
+    if (!devSource) {
+      void vscode.window.showInformationMessage(
+        'Context Doodle: enable contextDoodle.devMode.enabled to use dev commands.'
+      );
+      return undefined;
+    }
+    return devSource;
+  };
+
+  const presetFills = [0, 25, 50, 60, 65, 69, 70, 71, 80, 84, 85, 89, 90, 95, 100];
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('contextDoodle.dev.setFill', async () => {
+      const dev = requireDev();
+      if (!dev) return;
+      const input = await vscode.window.showInputBox({
+        title: 'Context Doodle (dev): set fill %',
+        value: String(dev.currentPercent),
+        prompt: 'Enter a percent value 0–100',
+        validateInput: (v) => {
+          const n = Number(v);
+          return Number.isFinite(n) && n >= 0 && n <= 100 ? null : 'Enter 0–100';
+        }
+      });
+      if (input === undefined) return;
+      dev.setFill(Number(input));
+    }),
+
+    vscode.commands.registerCommand('contextDoodle.dev.pickFill', async () => {
+      const dev = requireDev();
+      if (!dev) return;
+      const pick = await vscode.window.showQuickPick(
+        presetFills.map((p) => ({ label: `${p}%`, value: p })),
+        { title: 'Context Doodle (dev): pick a preset fill' }
+      );
+      if (!pick) return;
+      dev.setFill(pick.value);
+    }),
+
+    vscode.commands.registerCommand('contextDoodle.dev.bump', async () => {
+      const dev = requireDev();
+      if (!dev) return;
+      const pick = await vscode.window.showQuickPick(
+        ['+1', '+5', '+10', '-1', '-5', '-10'].map((l) => ({ label: l, value: Number(l) })),
+        { title: 'Context Doodle (dev): bump fill by…' }
+      );
+      if (!pick) return;
+      dev.bump(pick.value);
+    }),
+
+    vscode.commands.registerCommand('contextDoodle.dev.sweep', async () => {
+      const dev = requireDev();
+      if (!dev) return;
+      if (dev.isSweeping()) {
+        dev.stopSweep();
+        return;
+      }
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: 'Slow (40s/cycle)', value: 40000 },
+          { label: 'Medium (20s/cycle)', value: 20000 },
+          { label: 'Fast (10s/cycle)', value: 10000 }
+        ],
+        { title: 'Context Doodle (dev): sweep speed' }
+      );
+      if (!pick) return;
+      dev.startSweep(pick.value);
+    }),
+
+    vscode.commands.registerCommand('contextDoodle.dev.stopSweep', () => {
+      devSource?.stopSweep();
+    }),
+
+    vscode.commands.registerCommand('contextDoodle.dev.fireAlert', async () => {
+      const dev = requireDev();
+      if (!dev) return;
+      const sevPick = await vscode.window.showQuickPick(
+        [
+          { label: 'warning (amber, gentle shake)', value: 'warning' as AlertSeverity },
+          { label: 'critical (red, violent shake)', value: 'critical' as AlertSeverity }
+        ],
+        { title: 'Context Doodle (dev): fire alert — pick severity' }
+      );
+      if (!sevPick) return;
+      const pctInput = await vscode.window.showInputBox({
+        title: 'Context Doodle (dev): alert percent label',
+        value: sevPick.value === 'critical' ? '90' : '70',
+        prompt: 'Percent label to show in the badge / editor tag',
+        validateInput: (v) =>
+          Number.isFinite(Number(v)) && Number(v) > 0 && Number(v) < 100 ? null : 'Enter 1–99'
+      });
+      if (pctInput === undefined) return;
+      const cfg = readConfig();
+      const styles: AlertStyle[] = cfg.alertStyles.length
+        ? cfg.alertStyles
+        : ['statusBarFlash', 'activityBadge', 'blobShake', 'editorTag'];
+      dev.fireAlert(Number(pctInput), sevPick.value, styles, cfg.alertFlashDurationMs);
+    })
   );
 
   // ----- auto-open behaviors (off by default) -----
