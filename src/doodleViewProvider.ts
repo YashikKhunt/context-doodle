@@ -61,8 +61,30 @@ export class DoodleViewProvider implements vscode.WebviewViewProvider {
     if (!this._view) return;
     if (e.kind === 'fill') {
       void this._view.webview.postMessage({ type: 'fill', value: e.value, meta: e.meta });
-    } else {
+    } else if (e.kind === 'state') {
       void this._view.webview.postMessage({ type: 'state', text: e.text });
+    } else if (e.kind === 'alert') {
+      if (e.styles.includes('blobShake')) {
+        void this._view.webview.postMessage({
+          type: 'shake',
+          durationMs: e.durationMs,
+          severity: e.severity
+        });
+      }
+      if (e.styles.includes('activityBadge')) {
+        this._view.badge = {
+          value: e.percent,
+          tooltip: `Context Doodle: crossed ${e.percent}% (${e.severity})`
+        };
+        // Auto-clear the badge the next time the user reveals the view.
+        const view = this._view;
+        const once = view.onDidChangeVisibility(() => {
+          if (view.visible) {
+            view.badge = undefined;
+            once.dispose();
+          }
+        });
+      }
     }
   }
 }

@@ -62,8 +62,16 @@ export class DoodlePanelManager implements vscode.Disposable {
   private _post(panel: vscode.WebviewPanel, e: FillEvent): void {
     if (e.kind === 'fill') {
       void panel.webview.postMessage({ type: 'fill', value: e.value, meta: e.meta });
-    } else {
+    } else if (e.kind === 'state') {
       void panel.webview.postMessage({ type: 'state', text: e.text });
+    } else if (e.kind === 'alert') {
+      if (e.styles.includes('blobShake')) {
+        void panel.webview.postMessage({
+          type: 'shake',
+          durationMs: e.durationMs,
+          severity: e.severity
+        });
+      }
     }
   }
 

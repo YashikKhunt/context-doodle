@@ -79,6 +79,46 @@
           "type": "boolean",
           "default": false,
           "description": "Open the Context Doodle animated panel beside the active editor automatically when the extension activates. Drag/dock once and it stays visible while coding."
+        },
+        "contextDoodle.alerts.thresholds": {
+          "type": "array",
+          "default": [70, 90],
+          "items": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 100 },
+          "description": "Percent fill values that fire an alert when crossed upward (e.g. [70, 90]). Empty array disables alerts entirely."
+        },
+        "contextDoodle.alerts.styles": {
+          "type": "array",
+          "default": ["statusBarFlash", "activityBadge", "blobShake", "editorTag"],
+          "items": {
+            "type": "string",
+            "enum": ["statusBarFlash", "activityBadge", "blobShake", "editorTag"],
+            "enumDescriptions": [
+              "Status-bar item strobes between amber/red and steady state.",
+              "Number badge appears on the Context Doodle activity-bar icon until you reveal the view.",
+              "The animated SVG blob shakes in any open Context Doodle surface.",
+              "A small [ctx NN%] tag is rendered at end-of-line of the active editor's cursor line."
+            ]
+          },
+          "description": "Which alert surfaces to react when a threshold is crossed. Empty array disables alerts entirely."
+        },
+        "contextDoodle.alerts.flashDurationMs": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 200,
+          "description": "How long the flash / shake / editor tag stays visible (ms)."
+        },
+        "contextDoodle.alerts.hysteresisMargin": {
+          "type": "number",
+          "default": 5,
+          "minimum": 0,
+          "description": "After firing, a threshold re-arms only once the fill drops this many percentage points below it. Prevents repeated alerts when fill oscillates around the boundary."
+        },
+        "contextDoodle.alerts.criticalAt": {
+          "type": "number",
+          "default": 85,
+          "minimum": 1,
+          "exclusiveMaximum": 100,
+          "description": "Thresholds at or above this value are treated as 'critical' (red); the rest are 'warning' (amber)."
         }
       }
     }

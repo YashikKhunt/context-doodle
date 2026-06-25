@@ -53,6 +53,29 @@ export function buildWebviewHtml(webview: vscode.Webview, nonce: string): string
     /* The blob lives inside an SVG viewBox of 200x200, centered at (100,100).
        We scale via the <g> transform so the path itself stays simple. */
     svg { width: 80%; max-width: 220px; height: auto; display: block; }
+    /* Shake animation runs on the SVG element itself via CSS transform — the
+       inner <g>'s SVG transform handles size/wobble independently, so the two
+       compose without fighting each other. */
+    @keyframes shake-warning {
+      0%, 100% { transform: translateX(0) rotate(0); }
+      20% { transform: translateX(-5px) rotate(-1.5deg); }
+      40% { transform: translateX(5px) rotate(1.5deg); }
+      60% { transform: translateX(-3px) rotate(-1deg); }
+      80% { transform: translateX(3px) rotate(1deg); }
+    }
+    @keyframes shake-critical {
+      0%, 100% { transform: translateX(0) rotate(0); }
+      10% { transform: translateX(-9px) rotate(-3deg); }
+      20% { transform: translateX(9px) rotate(3deg); }
+      30% { transform: translateX(-7px) rotate(-2.5deg); }
+      40% { transform: translateX(7px) rotate(2.5deg); }
+      50% { transform: translateX(-5px) rotate(-2deg); }
+      60% { transform: translateX(5px) rotate(2deg); }
+      70% { transform: translateX(-3px) rotate(-1deg); }
+      80% { transform: translateX(3px) rotate(1deg); }
+    }
+    svg.shake-warning { animation: shake-warning 0.45s ease-in-out infinite; }
+    svg.shake-critical { animation: shake-critical 0.35s ease-in-out infinite; }
     #blob {
       fill: var(--vscode-charts-blue, #4ea1ff);
       opacity: 0.85;
@@ -69,7 +92,7 @@ export function buildWebviewHtml(webview: vscode.Webview, nonce: string): string
 </head>
 <body>
   <div id="stage">
-    <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-label="Context doodle">
+    <svg id="blobSvg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-label="Context doodle">
       <g id="blobGroup" transform="translate(100 100) scale(1)">
         <!-- A friendly amoeba path centered around (0,0). -->
         <path id="blob" d="
@@ -91,9 +114,11 @@ export function buildWebviewHtml(webview: vscode.Webview, nonce: string): string
       // The host posts: { type: 'fill', value: number 0..1 }
       // We tween a single number toward that target and re-render the blob scale.
       const vscode = acquireVsCodeApi();
+      const blobSvg   = document.getElementById('blobSvg');
       const blobGroup = document.getElementById('blobGroup');
       const blobPath  = document.getElementById('blob');
       const caption   = document.getElementById('caption');
+      let shakeTimeout = null;
 
       // current = what's drawn now; target = where we're heading.
       // The blob's resting size at fill=0 is MIN_SCALE; at fill=1 it's MAX_SCALE.
@@ -140,6 +165,21 @@ export function buildWebviewHtml(webview: vscode.Webview, nonce: string): string
         } else if (msg.type === 'state') {
           // Friendly text states (e.g., "Cline not detected").
           caption.textContent = String(msg.text || '');
+        } else if (msg.type === 'shake') {
+          // Threshold-crossing alert. The shake CSS classes are mutually
+          // exclusive — clear both before applying the one we want.
+          const sev = msg.severity === 'critical' ? 'critical' : 'warning';
+          const duration = Math.max(200, Number(msg.durationMs) || 2000);
+          blobSvg.classList.remove('shake-warning', 'shake-critical');
+          // Force reflow so the animation restarts cleanly if a second alert
+          // arrives mid-shake.
+          void blobSvg.offsetWidth;
+          blobSvg.classList.add('shake-' + sev);
+          if (shakeTimeout) clearTimeout(shakeTimeout);
+          shakeTimeout = setTimeout(() => {
+            blobSvg.classList.remove('shake-warning', 'shake-critical');
+            shakeTimeout = null;
+          }, duration);
         }
       });
 

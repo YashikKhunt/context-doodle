@@ -28,6 +28,13 @@ export class StatusBarBlob implements vscode.Disposable {
   private _max = 200000;
   private _mode: 'fill' | 'state' | 'missing' = 'fill';
   private _stateText = '';
+  // Flash effect: a separate, faster pulse that toggles the background between
+  // the alert color and undefined for `flashDurationMs`. Driven by its own
+  // timer so it doesn't depend on the steady tween/pulse cadence.
+  private _flashTimer: NodeJS.Timeout | undefined;
+  private _flashDeadline = 0;
+  private _flashSeverity: 'warning' | 'critical' | undefined;
+  private _flashPhase = 0;
 
   private static readonly CHARS = ['·', '∘', '○', '◌', '◎', '●', '⬤'];
 
@@ -56,13 +63,35 @@ export class StatusBarBlob implements vscode.Disposable {
     if (e.kind === 'state') {
       this._mode = 'state';
       this._stateText = e.text;
-    } else {
+    } else if (e.kind === 'fill') {
       this._mode = 'fill';
       this._targetFill = Math.max(0, Math.min(1, e.value));
       this._used = e.meta.contextUsed;
       this._max = e.meta.contextWindowMax;
+    } else if (e.kind === 'alert') {
+      if (e.styles.includes('statusBarFlash')) {
+        this._startFlash(e.severity, e.durationMs);
+      }
     }
     this._render();
+  }
+
+  private _startFlash(severity: 'warning' | 'critical', durationMs: number): void {
+    this._flashSeverity = severity;
+    this._flashDeadline = Date.now() + durationMs;
+    this._flashPhase = 0;
+    if (this._flashTimer) return;
+    // 150ms strobe — fast enough to register as "attention!", slow enough
+    // not to feel like a seizure.
+    this._flashTimer = setInterval(() => {
+      this._flashPhase = (this._flashPhase + 1) % 2;
+      if (Date.now() >= this._flashDeadline) {
+        clearInterval(this._flashTimer!);
+        this._flashTimer = undefined;
+        this._flashSeverity = undefined;
+      }
+      this._render();
+    }, 150);
   }
 
   private _tween(): void {
@@ -95,6 +124,18 @@ export class StatusBarBlob implements vscode.Disposable {
     this._item.text = `${char} ${pct}% ctx`;
     this._item.tooltip = `${this._used.toLocaleString()} / ${this._max.toLocaleString()} tokens (${pct}%) — click to reveal Context Doodle`;
 
+    // Flash takes precedence: alternate background between alert color and
+    // the steady-state color so the eye catches the motion.
+    if (this._flashSeverity) {
+      const flashColor =
+        this._flashSeverity === 'critical'
+          ? 'statusBarItem.errorBackground'
+          : 'statusBarItem.warningBackground';
+      this._item.backgroundColor =
+        this._flashPhase === 0 ? new vscode.ThemeColor(flashColor) : undefined;
+      return;
+    }
+
     if (f >= 0.85) {
       this._item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
     } else if (f >= 0.6) {
@@ -107,6 +148,7 @@ export class StatusBarBlob implements vscode.Disposable {
   dispose(): void {
     clearInterval(this._tweenTimer);
     clearInterval(this._pulseTimer);
+    if (this._flashTimer) clearInterval(this._flashTimer);
     this._sub.dispose();
     this._item.dispose();
   }

@@ -3,7 +3,11 @@ import { DoodleViewProvider } from './doodleViewProvider';
 import { DoodlePanelManager } from './doodlePanelManager';
 import { StatusBarBlob } from './statusBarBlob';
 import { FillBroadcaster, FillMeta } from './fillBroadcaster';
+import { AlertEngine } from './alertEngine';
+import { EditorTagDecorator } from './editorTagDecorator';
 import { findNewestTask, readContextUsed, resolveTargetStorageDir } from './clineReader';
+
+type AlertStyle = 'statusBarFlash' | 'activityBadge' | 'blobShake' | 'editorTag';
 
 interface Config {
   contextWindowMax: number;
@@ -12,6 +16,33 @@ interface Config {
   statusBarEnabled: boolean;
   autoRevealSidebar: boolean;
   autoOpenPanel: boolean;
+  alertThresholds: number[];
+  alertStyles: AlertStyle[];
+  alertFlashDurationMs: number;
+  alertHysteresisMargin: number;
+  alertCriticalAt: number;
+}
+
+const ALL_ALERT_STYLES: AlertStyle[] = ['statusBarFlash', 'activityBadge', 'blobShake', 'editorTag'];
+
+function sanitizeThresholds(raw: unknown): number[] {
+  // Accept e.g. [70, 90] or ["70", "90"]; clamp to (0, 100); de-dupe; sort ascending.
+  const arr = Array.isArray(raw) ? raw : [];
+  const cleaned = arr
+    .map((n) => Number(n))
+    .filter((n) => Number.isFinite(n) && n > 0 && n < 100);
+  return Array.from(new Set(cleaned)).sort((a, b) => a - b);
+}
+
+function sanitizeStyles(raw: unknown): AlertStyle[] {
+  const arr = Array.isArray(raw) ? raw : [];
+  const set = new Set<AlertStyle>();
+  for (const v of arr) {
+    if (typeof v === 'string' && (ALL_ALERT_STYLES as string[]).includes(v)) {
+      set.add(v as AlertStyle);
+    }
+  }
+  return Array.from(set);
 }
 
 function readConfig(): Config {
@@ -22,7 +53,12 @@ function readConfig(): Config {
     targetExtensionId: c.get<string>('targetExtensionId', 'saoudrizwan.claude-dev'),
     statusBarEnabled: c.get<boolean>('statusBar.enabled', true),
     autoRevealSidebar: c.get<boolean>('autoRevealSidebar', false),
-    autoOpenPanel: c.get<boolean>('autoOpenPanel', false)
+    autoOpenPanel: c.get<boolean>('autoOpenPanel', false),
+    alertThresholds: sanitizeThresholds(c.get('alerts.thresholds', [70, 90])),
+    alertStyles: sanitizeStyles(c.get('alerts.styles', ALL_ALERT_STYLES)),
+    alertFlashDurationMs: c.get<number>('alerts.flashDurationMs', 2000),
+    alertHysteresisMargin: c.get<number>('alerts.hysteresisMargin', 5),
+    alertCriticalAt: c.get<number>('alerts.criticalAt', 85)
   };
 }
 
@@ -59,6 +95,37 @@ export function activate(context: vscode.ExtensionContext): void {
   syncStatusBar();
   context.subscriptions.push({ dispose: () => statusBar?.dispose() });
 
+  // ----- editor inline-tag decorator (always subscribed; gated by alert.styles) -----
+  const editorDecorator = new EditorTagDecorator(broadcaster);
+  context.subscriptions.push(editorDecorator);
+
+  // ----- alert engine (rebuilt on config change) -----
+  let stopAlerts: (() => void) | undefined;
+  const syncAlertEngine = (): void => {
+    stopAlerts?.();
+    const cfg = readConfig();
+    if (cfg.alertThresholds.length === 0 || cfg.alertStyles.length === 0) {
+      // User disabled alerts — no engine, nothing fires.
+      stopAlerts = undefined;
+      return;
+    }
+    const engine = new AlertEngine(
+      broadcaster,
+      cfg.alertThresholds,
+      cfg.alertHysteresisMargin,
+      cfg.alertCriticalAt
+    );
+    const sub = engine.onAlert(({ percent, severity }) => {
+      broadcaster.postAlert(percent, severity, cfg.alertFlashDurationMs, cfg.alertStyles);
+    });
+    stopAlerts = (): void => {
+      sub.dispose();
+      engine.dispose();
+    };
+  };
+  syncAlertEngine();
+  context.subscriptions.push({ dispose: () => stopAlerts?.() });
+
   // ----- commands -----
   context.subscriptions.push(
     vscode.commands.registerCommand('contextDoodle.revealSidebar', async () => {
@@ -80,6 +147,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (!e.affectsConfiguration('contextDoodle')) return;
       syncStatusBar();
+      syncAlertEngine();
       startPoller();
     }),
     { dispose: () => stopPoller?.() }
