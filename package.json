@@ -1,16 +1,35 @@
 {
   "name": "context-doodle",
   "displayName": "Context Doodle",
-  "description": "An animated SVG blob that grows fatter as your Cline AI-coding session's context window fills up.",
+  "description": "An ambient animated blob that grows as your Cline AI-coding session's context window fills up — with threshold alerts and a dev mode.",
   "version": "0.1.0",
-  "publisher": "context-doodle",
-  "private": true,
+  "publisher": "YashikKhunt",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YashikKhunt/context-doodle.git"
+  },
+  "bugs": {
+    "url": "https://github.com/YashikKhunt/context-doodle/issues"
+  },
+  "homepage": "https://github.com/YashikKhunt/context-doodle#readme",
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
     "Visualization",
     "Other"
+  ],
+  "keywords": [
+    "cline",
+    "context window",
+    "token usage",
+    "ai coding",
+    "ambient",
+    "vibe coding",
+    "roo code",
+    "kilo"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -191,11 +210,14 @@
     "build": "node esbuild.js --production",
     "watch": "node esbuild.js --watch",
     "compile": "tsc --noEmit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "package": "vsce package",
+    "publish:marketplace": "vsce publish"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.2.0",
     "esbuild": "^0.23.0",
     "typescript": "^5.4.0"
   }

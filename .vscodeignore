@@ -1,0 +1,29 @@
+# Files NOT to ship in the .vsix bundle. The principle: only the runtime
+# bundle (dist/), the icons (media/), and the surface docs (README, CHANGELOG,
+# LICENSE) need to reach end users.
+
+# Source — bundled into dist/extension.js by esbuild
+src/**
+tsconfig.json
+esbuild.js
+
+# Dev tooling
+node_modules/**
+.vscode/**
+.github/**
+.git/**
+.gitignore
+.claude/**
+
+# Scratch / artifacts
+*.vsix
+*.map
+**/*.ts.map
+**/*.js.map
+
+# Per-OS noise
+.DS_Store
+Thumbs.db
+
+# Per-project source asset that isn't shipped (only icon.png is)
+media/marketplace-icon.svg

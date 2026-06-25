@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1f2430"/>
+      <stop offset="100%" stop-color="#0e1117"/>
+    </linearGradient>
+    <linearGradient id="blob" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#6cb8ff"/>
+      <stop offset="100%" stop-color="#1d6ebf"/>
+    </linearGradient>
+    <radialGradient id="hilite" cx="0.35" cy="0.30" r="0.45">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="128" height="128" rx="22" fill="url(#bg)"/>
+  <g transform="translate(64 66)">
+    <path d="
+      M 0 -40
+      C 24 -40 44 -26 44 -5
+      C 44 16 30 36 8 40
+      C -13 44 -36 32 -42 12
+      C -48 -8 -36 -30 -16 -36
+      C -11 -39 -6 -40 0 -40 Z
+    " fill="url(#blob)"/>
+    <path d="
+      M 0 -40
+      C 24 -40 44 -26 44 -5
+      C 44 16 30 36 8 40
+      C -13 44 -36 32 -42 12
+      C -48 -8 -36 -30 -16 -36
+      C -11 -39 -6 -40 0 -40 Z
+    " fill="url(#hilite)"/>
+  </g>
+</svg>
