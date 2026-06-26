@@ -78,6 +78,13 @@ export interface TraceTotals {
   llmCalls: number;
 }
 
+export interface DriftResult {
+  score: number;       // 0..1, where 1 = fully on-topic vs. the objective
+  reason: string;
+  strategy: 'embeddings' | 'lm';
+  basis?: string;      // short description of what was actually compared
+}
+
 export interface TraceModel {
   taskId: string;
   objective: string;       // first user-provided task description, empty if absent
@@ -87,4 +94,7 @@ export interface TraceModel {
   // Source mtime so consumers can debounce on "model changed" rather than
   // re-running deep equality.
   sourceMtimeMs?: number;
+  // Tier B: present only when contextDoodle.agentTrace.driftStrategy is on
+  // AND a checker has produced a result. Absent in pure Tier-A mode.
+  drift?: DriftResult;
 }

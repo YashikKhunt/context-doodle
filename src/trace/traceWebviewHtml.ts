@@ -51,6 +51,9 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
     .header .stat .k { color: var(--vscode-descriptionForeground); font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
     .header .stat .v { font-variant-numeric: tabular-nums; }
     .header .stat .v.err { color: var(--vscode-charts-red, #f48771); }
+    .header .stat .v.drift-low  { color: var(--vscode-charts-red, #f48771); }
+    .header .stat .v.drift-mid  { color: var(--vscode-charts-yellow, #e2c08d); }
+    .header .stat .v.drift-high { color: var(--vscode-charts-green, #89d185); }
     /* Stacked horizontal token bar — in (blue) + cache (green) + out (orange).
        Width of the row is proportional to the phase's share of total tokens. */
     .phase-bar-wrap { margin: 4px 0 2px 24px; }
@@ -284,6 +287,16 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
           { k: 'Errors',    v: String(t.errors), cls: t.errors ? 'err' : '' },
           { k: 'Cost',      v: fmtCost(t.cost) }
         ];
+        // Tier B: present only when the extension has computed a drift result.
+        if (model.drift) {
+          const pct = Math.round(model.drift.score * 100);
+          const cls = pct < 35 ? 'drift-low' : (pct < 70 ? 'drift-mid' : 'drift-high');
+          stats.push({
+            k: 'On-topic',
+            v: pct + '% (' + model.drift.strategy + ')',
+            cls
+          });
+        }
 
         root.innerHTML =
           '<div class="header">' +

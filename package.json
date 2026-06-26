@@ -206,6 +206,30 @@
           "type": "boolean",
           "default": false,
           "description": "Replace the on-disk Cline reader with a manual fill source so you can drive the doodle, alerts, and surfaces from the command palette without Cline running. When on, six 'Context Doodle (Dev)' commands appear in the palette."
+        },
+        "contextDoodle.agentTrace.driftStrategy": {
+          "type": "string",
+          "enum": ["off", "embeddings", "lm"],
+          "default": "off",
+          "enumDescriptions": [
+            "Disabled. Only Tier-A anomaly detection runs.",
+            "Local text-overlap proxy (stopword-filtered Jaccard, calibrated). Offline, deterministic, no network. Best for 'agent is now talking about completely different things' — won't catch subtle topic shifts.",
+            "Use the VS Code Language Model API (vscode.lm) as a judge: asks the available chat model whether the agent is still pursuing the original objective. Requires a chat-capable extension like GitHub Copilot to be installed and authorized. Rate-limited; never blocks the UI."
+          ],
+          "description": "Optional Tier-B semantic drift check. Adds an 'On-topic %' indicator to the Agent Trace header and a 'plan-drift' anomaly when the score drops below the threshold."
+        },
+        "contextDoodle.agentTrace.driftThreshold": {
+          "type": "number",
+          "default": 0.15,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "When the drift score falls below this, a plan-drift anomaly is added to the Flags band. Below half this value, the anomaly is escalated to critical. The default (0.15) is calibrated for the local 'embeddings' proxy, which scores conservatively because short objectives have few content terms. If using the 'lm' strategy, bump this to around 0.5."
+        },
+        "contextDoodle.agentTrace.driftCheckIntervalMs": {
+          "type": "number",
+          "default": 30000,
+          "minimum": 5000,
+          "description": "Minimum interval between LM-judge drift checks (the embeddings strategy ignores this; it's cheap enough to run every poll)."
         }
       }
     }

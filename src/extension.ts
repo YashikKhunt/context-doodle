@@ -11,6 +11,7 @@ import { TraceBroadcaster } from './trace/traceBroadcaster';
 import { TraceViewProvider } from './trace/traceViewProvider';
 import { parseTrace } from './trace/parser';
 import { detectAnomalies } from './trace/anomalies';
+import { DriftChecker, DriftStrategy, makeDriftChecker } from './trace/driftCheck';
 import * as fs from 'fs/promises';
 
 interface Config {
@@ -26,6 +27,9 @@ interface Config {
   alertHysteresisMargin: number;
   alertCriticalAt: number;
   devModeEnabled: boolean;
+  driftStrategy: DriftStrategy;
+  driftThreshold: number;
+  driftCheckIntervalMs: number;
 }
 
 const ALL_ALERT_STYLES: AlertStyle[] = ['statusBarFlash', 'activityBadge', 'blobShake', 'editorTag'];
@@ -64,8 +68,15 @@ function readConfig(): Config {
     alertFlashDurationMs: c.get<number>('alerts.flashDurationMs', 2000),
     alertHysteresisMargin: c.get<number>('alerts.hysteresisMargin', 5),
     alertCriticalAt: c.get<number>('alerts.criticalAt', 85),
-    devModeEnabled: c.get<boolean>('devMode.enabled', false)
+    devModeEnabled: c.get<boolean>('devMode.enabled', false),
+    driftStrategy: sanitizeDriftStrategy(c.get('agentTrace.driftStrategy', 'off')),
+    driftThreshold: c.get<number>('agentTrace.driftThreshold', 0.15),
+    driftCheckIntervalMs: c.get<number>('agentTrace.driftCheckIntervalMs', 30000)
   };
+}
+
+function sanitizeDriftStrategy(v: unknown): DriftStrategy {
+  return v === 'embeddings' || v === 'lm' ? v : 'off';
 }
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -350,6 +361,14 @@ function startFillPoller(
   let lastTaskId: string | undefined;
   let lastTraceMtime: number | undefined;
   let disposed = false;
+  // Tier B: live drift checker, lazily constructed. We hold the latest model
+  // here so an async drift result can be re-attached + re-broadcast without
+  // needing another disk read.
+  const driftChecker: DriftChecker | undefined = makeDriftChecker(
+    cfg.driftStrategy,
+    cfg.driftCheckIntervalMs
+  );
+  let latestModel: import('./trace/types').TraceModel | undefined;
 
   const publishUsed = (used: number): void => {
     const max = Math.max(1, cfg.contextWindowMax);
@@ -414,10 +433,37 @@ function startFillPoller(
       lastGoodUsed = used;
       publishUsed(used);
 
+      // Carry forward the most recent drift result (if any) so the UI
+      // doesn't lose it on a non-drift-related re-poll.
+      if (latestModel?.drift && latestModel.taskId === model.taskId) {
+        model.drift = latestModel.drift;
+        maybePromoteDriftToAnomaly(model, cfg.driftThreshold);
+      }
+      latestModel = model;
+
       // Debounce trace updates on mtime; the broadcaster checks equality.
       if (lastTraceMtime !== newest.mtimeMs && traceBroadcaster.shouldRepublish(model)) {
         lastTraceMtime = newest.mtimeMs;
         traceBroadcaster.postTrace(model);
+      }
+
+      // Tier B: kick off (or refresh) the drift check. The checker handles
+      // its own rate limiting; we don't await it here so the poll stays
+      // snappy. When a fresh result arrives, re-attach + re-broadcast.
+      if (driftChecker) {
+        void driftChecker
+          .check(model)
+          .then((res) => {
+            if (disposed || !res || !latestModel || latestModel.taskId !== model.taskId) return;
+            const prevScore = latestModel.drift?.score;
+            latestModel.drift = res;
+            maybePromoteDriftToAnomaly(latestModel, cfg.driftThreshold);
+            // Re-broadcast only if the score actually changed meaningfully.
+            if (prevScore === undefined || Math.abs(prevScore - res.score) > 0.02) {
+              traceBroadcaster.postTrace(latestModel);
+            }
+          })
+          .catch(() => undefined);
       }
     } catch (err) {
       console.error('[context-doodle] poll error', err);
@@ -429,6 +475,26 @@ function startFillPoller(
 
   return (): void => {
     disposed = true;
+    driftChecker?.dispose();
     clearInterval(handle);
   };
+}
+
+/** If the drift score is below the threshold, surface it as a plan-drift
+ *  anomaly so it appears in the Flags band alongside Tier-A findings. */
+function maybePromoteDriftToAnomaly(
+  model: import('./trace/types').TraceModel,
+  threshold: number
+): void {
+  if (!model.drift) return;
+  // Drop any prior plan-drift anomaly first — score may have recovered.
+  model.anomalies = model.anomalies.filter((a) => a.type !== 'plan-drift');
+  if (model.drift.score >= threshold) return;
+  model.anomalies.push({
+    type: 'plan-drift',
+    severity: model.drift.score < threshold / 2 ? 'critical' : 'warning',
+    atTs: model.sourceMtimeMs ?? Date.now(),
+    evidence: [],
+    message: `Drift score ${Math.round(model.drift.score * 100)}% — ${model.drift.reason}`
+  });
 }
