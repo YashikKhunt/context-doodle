@@ -95,63 +95,7 @@ export async function findNewestTask(storageRoot: string): Promise<NewestTask | 
   return best;
 }
 
-interface ApiReqStartedPayload {
-  tokensIn?: number;
-  tokensOut?: number;
-  cacheReads?: number;
-  cacheWrites?: number;
-  cost?: number;
-  apiProtocol?: string;
-}
-
-interface UiEvent {
-  say?: string;
-  text?: string;
-}
-
-/**
- * Read the latest `api_req_started` payload from a ui_messages.json file and
- * return the implied `contextUsed` (tokensIn + cacheReads).
- *
- * Returns:
- *   - a number ≥ 0 when the file parsed successfully.
- *   - `undefined` if the file is unreadable or mid-write (caller should keep
- *     the previous value rather than flicker to 0).
- *   - 0 when the file is valid but has no api_req_started yet (brand-new task).
- */
-export async function readContextUsed(uiMessagesPath: string): Promise<number | undefined> {
-  let raw: string;
-  try {
-    raw = await fsp.readFile(uiMessagesPath, 'utf8');
-  } catch {
-    return undefined;
-  }
-
-  let events: UiEvent[];
-  try {
-    events = JSON.parse(raw) as UiEvent[];
-  } catch {
-    // Caught mid-write — keep last good value.
-    return undefined;
-  }
-  if (!Array.isArray(events)) return undefined;
-
-  for (let i = events.length - 1; i >= 0; i--) {
-    const ev = events[i];
-    if (ev && ev.say === 'api_req_started' && typeof ev.text === 'string') {
-      try {
-        const payload = JSON.parse(ev.text) as ApiReqStartedPayload;
-        const tokensIn = numberOr0(payload.tokensIn);
-        const cacheReads = numberOr0(payload.cacheReads);
-        return tokensIn + cacheReads;
-      } catch {
-        // Malformed inner JSON — keep scanning earlier events.
-      }
-    }
-  }
-  return 0;
-}
-
-function numberOr0(v: unknown): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
-}
+// Note: previously this module also exported readContextUsed() to extract the
+// latest api_req_started payload. As of Phase 6 that responsibility moved to
+// the trace parser — extension.ts reads the file once per tick, parses into a
+// TraceModel, and derives context-used from the last llm_call event.

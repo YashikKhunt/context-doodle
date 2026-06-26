@@ -51,6 +51,11 @@
           "id": "contextDoodle.view",
           "name": "Doodle",
           "type": "webview"
+        },
+        {
+          "id": "contextDoodle.traceView",
+          "name": "Agent Trace",
+          "type": "webview"
         }
       ]
     },

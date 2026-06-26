@@ -6,7 +6,11 @@ import { FillBroadcaster, FillMeta, AlertSeverity, AlertStyle } from './fillBroa
 import { AlertEngine } from './alertEngine';
 import { EditorTagDecorator } from './editorTagDecorator';
 import { DevFillSource } from './devFillSource';
-import { findNewestTask, readContextUsed, resolveTargetStorageDir } from './clineReader';
+import { findNewestTask, resolveTargetStorageDir } from './clineReader';
+import { TraceBroadcaster } from './trace/traceBroadcaster';
+import { TraceViewProvider } from './trace/traceViewProvider';
+import { parseTrace } from './trace/parser';
+import * as fs from 'fs/promises';
 
 interface Config {
   contextWindowMax: number;
@@ -65,15 +69,27 @@ function readConfig(): Config {
 
 export function activate(context: vscode.ExtensionContext): void {
   // ----- shared state -----
-  // One broadcaster fans state out to every visible surface (sidebar view,
-  // editor-area panel, status bar). The poller is the only producer.
+  // Two broadcasters: one for the lightweight fill ratio (drives doodle +
+  // status bar + alerts), one for the heavier parsed TraceModel (drives the
+  // Agent Trace timeline). Kept separate because they have very different
+  // payload sizes and don't need to update on the same cadence.
   const broadcaster = new FillBroadcaster();
+  const traceBroadcaster = new TraceBroadcaster();
   context.subscriptions.push({ dispose: () => broadcaster.dispose() });
+  context.subscriptions.push({ dispose: () => traceBroadcaster.dispose() });
 
   // ----- sidebar webview view -----
   const provider = new DoodleViewProvider(context.extensionUri, broadcaster);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(DoodleViewProvider.viewType, provider, {
+      webviewOptions: { retainContextWhenHidden: true }
+    })
+  );
+
+  // ----- Agent Trace view (Phase 7) -----
+  const traceProvider = new TraceViewProvider(context.extensionUri, traceBroadcaster);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(TraceViewProvider.viewType, traceProvider, {
       webviewOptions: { retainContextWhenHidden: true }
     })
   );
@@ -150,11 +166,14 @@ export function activate(context: vscode.ExtensionContext): void {
     if (cfg.devModeEnabled) {
       const dev = new DevFillSource(broadcaster, cfg.contextWindowMax);
       devSource = dev;
+      traceBroadcaster.postState(
+        'Developer mode is on. Trace view shows real data only when devMode is off.'
+      );
       stopSource = (): void => {
         dev.dispose();
       };
     } else {
-      stopSource = startFillPoller(context, broadcaster);
+      stopSource = startFillPoller(context, broadcaster, traceBroadcaster);
     }
   };
   startSource();
@@ -304,29 +323,31 @@ export function deactivate(): void {
  */
 function startFillPoller(
   context: vscode.ExtensionContext,
-  broadcaster: FillBroadcaster
+  broadcaster: FillBroadcaster,
+  traceBroadcaster: TraceBroadcaster
 ): () => void {
   const cfg = readConfig();
 
   const target = vscode.extensions.getExtension(cfg.targetExtensionId);
   if (!target) {
-    broadcaster.postState(
-      `"${cfg.targetExtensionId}" not detected. Install Cline (or set contextDoodle.targetExtensionId).`
-    );
+    const msg = `"${cfg.targetExtensionId}" not detected. Install Cline (or set contextDoodle.targetExtensionId).`;
+    broadcaster.postState(msg);
+    traceBroadcaster.postState(msg);
     return () => undefined;
   }
 
   const storageRoot = resolveTargetStorageDir(context, cfg.targetExtensionId);
   if (!storageRoot) {
-    broadcaster.postState(
-      "Could not locate the target extension's globalStorage. Open a task in Cline once, then reload."
-    );
+    const msg = "Could not locate the target extension's globalStorage. Open a task in Cline once, then reload.";
+    broadcaster.postState(msg);
+    traceBroadcaster.postState(msg);
     return () => undefined;
   }
 
   let lastPostedRatio: number | undefined;
   let lastGoodUsed: number | undefined;
   let lastTaskId: string | undefined;
+  let lastTraceMtime: number | undefined;
   let disposed = false;
 
   const publishUsed = (used: number): void => {
@@ -344,19 +365,56 @@ function startFillPoller(
       const newest = await findNewestTask(storageRoot);
       if (!newest) {
         publishUsed(0);
+        traceBroadcaster.postState('No active task yet.');
         return;
       }
       if (newest.taskId !== lastTaskId) {
         lastTaskId = newest.taskId;
         lastGoodUsed = undefined;
+        lastTraceMtime = undefined; // force re-publish on task switch
       }
-      const used = await readContextUsed(newest.uiMessagesPath);
-      if (used === undefined) {
+
+      // ONE disk read serves both channels: parse the array once, derive
+      // the fill ratio from the last llm_call, hand the model to the trace
+      // broadcaster (which dedupes on mtime).
+      let raw: string;
+      try {
+        raw = await fs.readFile(newest.uiMessagesPath, 'utf8');
+      } catch {
         publishUsed(lastGoodUsed ?? 0);
         return;
       }
+      let arr: unknown;
+      try {
+        arr = JSON.parse(raw);
+      } catch {
+        // Partial mid-write — keep last good fill, don't re-publish trace.
+        publishUsed(lastGoodUsed ?? 0);
+        return;
+      }
+
+      const model = parseTrace({
+        taskId: newest.taskId,
+        raw: arr,
+        sourceMtimeMs: newest.mtimeMs
+      });
+
+      // Derive context-used from the LAST llm_call in the model — matches
+      // the old `readContextUsed` semantics without a second pass.
+      const lastLlm = [...model.phases.flatMap((p) => p.events)]
+        .reverse()
+        .find((e) => e.kind === 'llm_call');
+      const used = lastLlm
+        ? (lastLlm.tokensIn ?? 0) + (lastLlm.cacheReads ?? 0)
+        : 0;
       lastGoodUsed = used;
       publishUsed(used);
+
+      // Debounce trace updates on mtime; the broadcaster checks equality.
+      if (lastTraceMtime !== newest.mtimeMs && traceBroadcaster.shouldRepublish(model)) {
+        lastTraceMtime = newest.mtimeMs;
+        traceBroadcaster.postTrace(model);
+      }
     } catch (err) {
       console.error('[context-doodle] poll error', err);
     }
