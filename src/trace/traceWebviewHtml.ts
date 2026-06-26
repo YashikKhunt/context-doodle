@@ -68,6 +68,32 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
       color: var(--vscode-descriptionForeground);
       font-variant-numeric: tabular-nums;
     }
+    /* Flags band sits between header and phases when anomalies exist. */
+    .flags { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+    .flag {
+      display: grid;
+      grid-template-columns: 18px auto 1fr;
+      gap: 6px;
+      align-items: baseline;
+      padding: 5px 8px;
+      border-left: 3px solid var(--vscode-charts-yellow, #e2c08d);
+      background: var(--vscode-inputValidation-warningBackground, rgba(226, 192, 141, 0.08));
+      border-radius: 2px;
+      font-size: 12px;
+    }
+    .flag.critical {
+      border-left-color: var(--vscode-charts-red, #f48771);
+      background: var(--vscode-inputValidation-errorBackground, rgba(244, 135, 113, 0.08));
+    }
+    .flag .ic { font-size: 12px; text-align: center; line-height: 1; }
+    .flag .type {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--vscode-descriptionForeground); padding-right: 4px;
+    }
+    .flag .msg { word-break: break-word; }
+    /* Event rows that participated in any anomaly get a subtle left border. */
+    .event.has-anomaly { border-left: 2px solid var(--vscode-charts-yellow, #e2c08d); padding-left: 4px; margin-left: -6px; }
+    .event.has-anomaly.critical-anomaly { border-left-color: var(--vscode-charts-red, #f48771); }
     .phase { margin-top: 14px; }
     .phase-head {
       display: flex; align-items: center; gap: 6px;
@@ -164,6 +190,10 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
         );
       }
 
+      // Set of event ids that participated in any anomaly; populated by render().
+      let anomalyIds = new Set();
+      let criticalAnomalyIds = new Set();
+
       function eventRow(ev) {
         const icon = ICONS[ev.kind] || '·';
         let delta = '';
@@ -174,8 +204,11 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
           if (ev.tokensOut)  parts.push('out ' + fmtTokens(ev.tokensOut));
           delta = parts.join(' · ');
         }
+        const extraCls =
+          (anomalyIds.has(ev.id) ? ' has-anomaly' : '') +
+          (criticalAnomalyIds.has(ev.id) ? ' critical-anomaly' : '');
         return (
-          '<div class="event ' + ev.kind + '">' +
+          '<div class="event ' + ev.kind + extraCls + '">' +
             '<span class="icon">' + icon + '</span>' +
             '<span class="label">' + esc(ev.label || ev.kind) + '</span>' +
             '<span class="delta">' + esc(delta) + '</span>' +
@@ -205,6 +238,18 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
         );
       }
 
+      function flagBlock(a) {
+        const icons = { 'tool-loop': '↻', 'error-storm': '⚠', stall: '⏸', 'context-loss': '⊟', 'plan-drift': '↯' };
+        const ic = icons[a.type] || '⚠';
+        return (
+          '<div class="flag ' + esc(a.severity) + '">' +
+            '<span class="ic">' + ic + '</span>' +
+            '<span class="type">' + esc(a.type) + '</span>' +
+            '<span class="msg">' + esc(a.message) + '</span>' +
+          '</div>'
+        );
+      }
+
       function render(model) {
         if (!model || !model.phases || model.phases.length === 0) {
           root.innerHTML = '<div id="empty">No events yet for this task.</div>';
@@ -214,6 +259,20 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
         const t = model.totals;
         const subtasks = model.phases.filter(p => p.mode === 'subtask').length;
         const grandTotalTokens = t.tokensIn + t.cacheReads + t.tokensOut;
+
+        // Rebuild the evidence-id sets so eventRow can mark them.
+        anomalyIds = new Set();
+        criticalAnomalyIds = new Set();
+        const anomalies = model.anomalies || [];
+        for (const a of anomalies) {
+          for (const id of (a.evidence || [])) {
+            anomalyIds.add(id);
+            if (a.severity === 'critical') criticalAnomalyIds.add(id);
+          }
+        }
+        const flagsHtml = anomalies.length
+          ? '<div class="flags">' + anomalies.map(flagBlock).join('') + '</div>'
+          : '';
 
         // Per-cell summary stats. Errors get a red v-color when nonzero.
         const stats = [
@@ -238,6 +297,7 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
               ).join('') +
             '</div>' +
           '</div>' +
+          flagsHtml +
           model.phases.map((p, i) => phaseBlock(p, i, grandTotalTokens)).join('');
       }
 

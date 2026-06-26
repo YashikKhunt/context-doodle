@@ -10,6 +10,7 @@ import { findNewestTask, resolveTargetStorageDir } from './clineReader';
 import { TraceBroadcaster } from './trace/traceBroadcaster';
 import { TraceViewProvider } from './trace/traceViewProvider';
 import { parseTrace } from './trace/parser';
+import { detectAnomalies } from './trace/anomalies';
 import * as fs from 'fs/promises';
 
 interface Config {
@@ -398,6 +399,9 @@ function startFillPoller(
         raw: arr,
         sourceMtimeMs: newest.mtimeMs
       });
+      // Detectors are pure functions over the parsed model — running them
+      // post-parse keeps the parser stripped of policy concerns.
+      model.anomalies = detectAnomalies(model);
 
       // Derive context-used from the LAST llm_call in the model — matches
       // the old `readContextUsed` semantics without a second pass.
