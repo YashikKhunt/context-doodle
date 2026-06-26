@@ -35,6 +35,13 @@ export class TraceBroadcaster {
     if (this._last) handler(this._last);
   }
 
+  /** Convenience for commands (e.g. export) that need the current model
+   *  without subscribing to future updates. Returns undefined if nothing
+   *  has been published yet, or if the last event was a 'state'. */
+  getLastModel(): TraceModel | undefined {
+    return this._last?.kind === 'trace' ? this._last.model : undefined;
+  }
+
   /** Convenience for debouncing: only re-publish if the source file actually changed. */
   shouldRepublish(model: TraceModel): boolean {
     if (!this._last || this._last.kind !== 'trace') return true;

@@ -89,6 +89,78 @@ The CSP is locked down to `default-src 'none'` with a nonce on the one inline sc
 | You switch tasks in Cline | Newest task by `mtime` wins; the old task's stale value is dropped on switch. |
 | Sidebar hidden | Polling continues; the latest value is replayed on re-reveal. |
 
+## Agent Trace view
+
+A second sidebar view, **Agent Trace**, lives inside the same activity-bar container as the doodle. It reads the same per-task `ui_messages.json` and renders the agent's reasoning path as a vertical timeline.
+
+What you see:
+
+- **Header**: the original objective + a 7-cell stat grid (phases · LLM calls · tokens in / out · tools · errors · cost). When Tier-B drift is enabled, an extra "On-topic NN%" tile appears, color-coded red / amber / green.
+- **Flags band**: appears whenever the extension detects an anomaly. Each row has a colored left border (yellow for warning, red for critical), the anomaly type, and a one-line message.
+- **Phase blocks**: each phase has a collapsible header with a mode badge (act / plan / subtask), a tools/errors/cost summary, and a stacked horizontal bar splitting tokens into in (blue), cache (green), and out (orange). Bar width is proportional to the phase's share of the run's total tokens.
+- **Event rows**: one row per normalized event, with a kind-specific glyph, the label, and (for LLM calls) a `in 12k · cache 0.5k · out 1.2k` delta. Rows that contributed to an anomaly get a colored left border.
+
+### Anomaly detectors (Tier A, always on)
+
+All thresholds are configurable, but the defaults are:
+
+| Detector | Default trigger |
+| --- | --- |
+| **tool-loop** | Same `(toolName, params)` ≥ 3 times within a sliding window of 5 consecutive tool calls. Params are canonicalized (key-sorted JSON) so `{a:1,b:2}` equals `{b:2,a:1}`. |
+| **error-storm** | ≥ 3 `error` events within a window of 5 consecutive events of any kind. Always `critical`. |
+| **stall** | A run of consecutive `llm_call` events with no tool/command/completion in between, where cumulative input tokens ≥ 50k. Catches "model is thinking in circles without acting". |
+| **context-loss** | Any explicit `truncation` event, OR a step-change in `conversationHistoryDeletedRange`. The first observation is treated as steady state, not a loss. |
+
+### Semantic drift (Tier B, opt-in)
+
+Off by default. Set `contextDoodle.agentTrace.driftStrategy`:
+
+- `off` — no drift check. Only Tier A runs.
+- `embeddings` — local Jaccard-on-stopword-filtered-terms proxy between the objective and the last 12 events. Offline, deterministic, no network or external models. **This is NOT real semantic embeddings** — VS Code's public extension API doesn't expose an embeddings model, and the extension makes no network calls. It catches gross topic shifts but won't pick up subtle drift. Default threshold (0.15) is calibrated for this strategy.
+- `lm` — uses `vscode.lm.selectChatModels()` to ask whatever chat model is available (typically GitHub Copilot) to score the agent's adherence to the objective. Rate-limited via `driftCheckIntervalMs`, never blocks the UI. If no chat model is available, the indicator simply doesn't appear. **Bump `driftThreshold` to ~0.5 when using this strategy.**
+
+When the score falls below the threshold, a `plan-drift` anomaly appears in the Flags band.
+
+### Export
+
+`Context Doodle: Export Agent Trace as JSON…` writes the current normalized `TraceModel` (phases + events + anomalies + drift, if any) to a file you pick. Useful for sharing a run with someone, archiving an interesting failure mode, or feeding the model into other tools.
+
+### Normalized data model
+
+The parser maps Cline's raw events into a provider-agnostic shape so the same UI works across Cline, Roo Code, and Kilo:
+
+```text
+TraceModel
+├── taskId
+├── objective                  (first user-provided task description)
+├── phases: AgentPhase[]
+│   └── { id, mode: 'act'|'plan'|'subtask', parentId?,
+│         startTs, endTs?, events: TraceEvent[],
+│         tokensIn, tokensOut, cacheReads, cacheWrites, cost,
+│         toolCalls, errors }
+├── anomalies: Anomaly[]
+│   └── { type, severity, atTs, evidence[], message }
+├── totals: TraceTotals
+└── drift?: { score, strategy: 'embeddings'|'lm', reason, basis? }
+
+TraceEvent.kind ∈ {
+  llm_call · reasoning · tool · command · browser · error ·
+  approval · truncation · completion · objective · checkpoint · unknown
+}
+```
+
+Unknown event kinds are bucketed into `'unknown'`, never crashed on. Inner JSON payloads (`api_req_started.text`, `error_retry.text`, `tool.text`) are parsed defensively with try/catch.
+
+## Roo Code & Kilo support
+
+Roo Code (`rooveterinaryinc.roo-cline`) and Kilo (`kilocode.kilo-code`) use the same `ui_messages.json` format as Cline. To watch them instead, set:
+
+```json
+"contextDoodle.targetExtensionId": "rooveterinaryinc.roo-cline"
+```
+
+No code changes needed. If you find a field that's structured differently in those forks, open an issue and the parser's `SAY_TO_KIND` table can absorb it.
+
 ## Developer mode
 
 Set `contextDoodle.devMode.enabled: true` and the extension replaces the on-disk Cline reader with a manual fill source. Six commands appear in the palette (only when dev mode is on):

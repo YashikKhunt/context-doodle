@@ -2,7 +2,7 @@
   "name": "context-doodle",
   "displayName": "Context Doodle",
   "description": "An ambient animated blob that grows as your Cline AI-coding session's context window fills up — with threshold alerts and a dev mode.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "YashikKhunt",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -67,6 +67,10 @@
       {
         "command": "contextDoodle.openPanel",
         "title": "Context Doodle: Open in Editor Area"
+      },
+      {
+        "command": "contextDoodle.trace.exportJson",
+        "title": "Context Doodle: Export Agent Trace as JSON…"
       },
       {
         "command": "contextDoodle.dev.setFill",

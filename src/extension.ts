@@ -161,7 +161,34 @@ export function activate(context: vscode.ExtensionContext): void {
       // VS Code auto-registers `<viewId>.focus` for every contributed view.
       await vscode.commands.executeCommand(`${DoodleViewProvider.viewType}.focus`);
     }),
-    vscode.commands.registerCommand('contextDoodle.openPanel', () => panelManager.reveal())
+    vscode.commands.registerCommand('contextDoodle.openPanel', () => panelManager.reveal()),
+
+    // Phase 11: export the currently displayed TraceModel to a local JSON
+    // file. Read-only by design — never writes into the watched extension's
+    // storage; only writes a fresh file the user explicitly picks.
+    vscode.commands.registerCommand('contextDoodle.trace.exportJson', async () => {
+      const model = traceBroadcaster.getLastModel();
+      if (!model) {
+        void vscode.window.showInformationMessage(
+          'Context Doodle: no trace data yet — open an active Cline task first.'
+        );
+        return;
+      }
+      const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
+      const target = await vscode.window.showSaveDialog({
+        title: 'Export Agent Trace',
+        defaultUri: defaultUri
+          ? vscode.Uri.joinPath(defaultUri, `agent-trace-${model.taskId}.json`)
+          : vscode.Uri.file(`agent-trace-${model.taskId}.json`),
+        filters: { JSON: ['json'] }
+      });
+      if (!target) return;
+      const json = JSON.stringify(model, null, 2);
+      await vscode.workspace.fs.writeFile(target, Buffer.from(json, 'utf8'));
+      void vscode.window.showInformationMessage(
+        `Context Doodle: exported trace (${model.phases.length} phases, ${model.totals.llmCalls} LLM calls) to ${target.fsPath}`
+      );
+    })
   );
 
   // ----- fill source: real poller OR developer mock (rebuilt on config change) -----
