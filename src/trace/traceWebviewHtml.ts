@@ -35,12 +35,39 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
     .header {
       position: sticky; top: 0;
       background: var(--vscode-sideBar-background, transparent);
-      padding: 8px 4px 6px;
+      padding: 8px 4px 8px;
       border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.2));
       z-index: 1;
     }
     .header .objective { font-weight: 600; word-break: break-word; }
-    .header .meta { color: var(--vscode-descriptionForeground); font-size: 11px; margin-top: 2px; }
+    .header .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(72px, 1fr));
+      gap: 4px 10px;
+      margin-top: 6px;
+      font-size: 11px;
+    }
+    .header .stat { display: flex; flex-direction: column; line-height: 1.15; }
+    .header .stat .k { color: var(--vscode-descriptionForeground); font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .header .stat .v { font-variant-numeric: tabular-nums; }
+    .header .stat .v.err { color: var(--vscode-charts-red, #f48771); }
+    /* Stacked horizontal token bar — in (blue) + cache (green) + out (orange).
+       Width of the row is proportional to the phase's share of total tokens. */
+    .phase-bar-wrap { margin: 4px 0 2px 24px; }
+    .phase-bar {
+      display: flex; height: 4px; border-radius: 2px;
+      background: var(--vscode-panel-border, rgba(128,128,128,0.15));
+      overflow: hidden;
+    }
+    .phase-bar > span { display: block; height: 100%; }
+    .phase-bar .seg-in    { background: var(--vscode-charts-blue, #4ea1ff); }
+    .phase-bar .seg-cache { background: var(--vscode-charts-green, #89d185); opacity: 0.85; }
+    .phase-bar .seg-out   { background: var(--vscode-charts-orange, #d18616); }
+    .phase-bar-legend {
+      display: flex; gap: 8px; font-size: 10px; margin-top: 2px;
+      color: var(--vscode-descriptionForeground);
+      font-variant-numeric: tabular-nums;
+    }
     .phase { margin-top: 14px; }
     .phase-head {
       display: flex; align-items: center; gap: 6px;
@@ -105,6 +132,37 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
       }
 
       function fmtTokens(n) { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
+      function fmtCost(n) {
+        if (!n) return '$0';
+        if (n < 0.01) return '<$0.01';
+        return '$' + n.toFixed(n < 1 ? 3 : 2);
+      }
+
+      // Stacked bar: in/cache/out widths proportional to the phase's tokens,
+      // and the whole bar's max-width is proportional to the phase's share of
+      // total tokens (so a phase that used 5% of all tokens is visually small).
+      function phaseBar(phase, grandTotal) {
+        const phaseTotal = phase.tokensIn + phase.cacheReads + phase.tokensOut;
+        if (phaseTotal === 0) return '';
+        const widthPct = grandTotal > 0 ? Math.max(2, (phaseTotal / grandTotal) * 100) : 100;
+        const inPct    = (phase.tokensIn   / phaseTotal) * 100;
+        const cachePct = (phase.cacheReads / phaseTotal) * 100;
+        const outPct   = (phase.tokensOut  / phaseTotal) * 100;
+        return (
+          '<div class="phase-bar-wrap" style="width:' + widthPct.toFixed(1) + '%; min-width: 60px;">' +
+            '<div class="phase-bar">' +
+              (inPct    > 0 ? '<span class="seg-in"    style="width:' + inPct.toFixed(1) + '%"></span>' : '') +
+              (cachePct > 0 ? '<span class="seg-cache" style="width:' + cachePct.toFixed(1) + '%"></span>' : '') +
+              (outPct   > 0 ? '<span class="seg-out"   style="width:' + outPct.toFixed(1) + '%"></span>' : '') +
+            '</div>' +
+            '<div class="phase-bar-legend">' +
+              (phase.tokensIn   ? '<span>in '    + fmtTokens(phase.tokensIn)   + '</span>' : '') +
+              (phase.cacheReads ? '<span>cache ' + fmtTokens(phase.cacheReads) + '</span>' : '') +
+              (phase.tokensOut  ? '<span>out '   + fmtTokens(phase.tokensOut)  + '</span>' : '') +
+            '</div>' +
+          '</div>'
+        );
+      }
 
       function eventRow(ev) {
         const icon = ICONS[ev.kind] || '·';
@@ -125,12 +183,12 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
         );
       }
 
-      function phaseBlock(phase, idx) {
-        const totals =
-          'in ' + fmtTokens(phase.tokensIn) +
-          ' · out ' + fmtTokens(phase.tokensOut) +
-          (phase.toolCalls ? ' · ' + phase.toolCalls + ' tool' : '') +
-          (phase.errors ? ' · ' + phase.errors + ' err' : '');
+      function phaseBlock(phase, idx, grandTotalTokens) {
+        const totalsBits = [];
+        if (phase.toolCalls) totalsBits.push(phase.toolCalls + ' tool');
+        if (phase.errors)    totalsBits.push(phase.errors + ' err');
+        if (phase.cost)      totalsBits.push(fmtCost(phase.cost));
+        const totals = totalsBits.join(' · ');
         const modeClass = 'mode ' + esc(phase.mode);
         return (
           '<div class="phase" data-phase="' + idx + '">' +
@@ -139,6 +197,7 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
               '<span class="' + modeClass + '">' + esc(phase.mode) + '</span>' +
               '<span class="totals">' + totals + '</span>' +
             '</div>' +
+            phaseBar(phase, grandTotalTokens) +
             '<div class="events" data-events="' + idx + '">' +
               phase.events.map(eventRow).join('') +
             '</div>' +
@@ -153,18 +212,33 @@ export function buildTraceHtml(webview: vscode.Webview, nonce: string): string {
         }
         const objective = model.objective || '(no objective)';
         const t = model.totals;
-        const meta =
-          model.phases.length + ' phase' + (model.phases.length === 1 ? '' : 's') +
-          ' · ' + t.llmCalls + ' LLM call' + (t.llmCalls === 1 ? '' : 's') +
-          ' · ' + fmtTokens(t.tokensIn + t.cacheReads) + ' in / ' + fmtTokens(t.tokensOut) + ' out' +
-          (t.errors ? ' · ' + t.errors + ' error' + (t.errors === 1 ? '' : 's') : '');
+        const subtasks = model.phases.filter(p => p.mode === 'subtask').length;
+        const grandTotalTokens = t.tokensIn + t.cacheReads + t.tokensOut;
+
+        // Per-cell summary stats. Errors get a red v-color when nonzero.
+        const stats = [
+          { k: 'Phases',    v: String(model.phases.length) + (subtasks ? ' (' + subtasks + ' sub)' : '') },
+          { k: 'LLM calls', v: String(t.llmCalls) },
+          { k: 'Tokens in', v: fmtTokens(t.tokensIn + t.cacheReads) },
+          { k: 'Tokens out',v: fmtTokens(t.tokensOut) },
+          { k: 'Tools',     v: String(t.toolCalls) },
+          { k: 'Errors',    v: String(t.errors), cls: t.errors ? 'err' : '' },
+          { k: 'Cost',      v: fmtCost(t.cost) }
+        ];
 
         root.innerHTML =
           '<div class="header">' +
             '<div class="objective">' + esc(objective) + '</div>' +
-            '<div class="meta">' + meta + '</div>' +
+            '<div class="stats">' +
+              stats.map(s =>
+                '<div class="stat">' +
+                  '<span class="k">' + esc(s.k) + '</span>' +
+                  '<span class="v ' + (s.cls || '') + '">' + esc(s.v) + '</span>' +
+                '</div>'
+              ).join('') +
+            '</div>' +
           '</div>' +
-          model.phases.map(phaseBlock).join('');
+          model.phases.map((p, i) => phaseBlock(p, i, grandTotalTokens)).join('');
       }
 
       function renderState(text) {
